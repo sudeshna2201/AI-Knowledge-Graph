@@ -13,8 +13,6 @@ final 2 and 3/
 ├── Milestone-2.py       # Entity & relationship extraction pipeline (Neo4j ← LLM → Neo4j)
 ├── MIlestone-3.py       # Hybrid RAG semantic search pipeline (Pinecone + Neo4j + LLM)
 ├── requirements.txt     # All Python dependencies for both milestones
-├── .env.example         # Template for required API keys and credentials
-├── .env                 # Your actual credentials (never commit this!)
 └── result.txt           # Sample pipeline output / results log
 ```
 
