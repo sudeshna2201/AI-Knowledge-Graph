@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import ForceGraph2D from "react-force-graph-2d";
-import type { GraphData, GraphNode, GraphEdge } from "../types";
-import { Network, ZoomIn, ZoomOut, Maximize2, RotateCcw, Info } from "lucide-react";
+import type { GraphData } from "../types";
+import { Network, ZoomIn, ZoomOut, Maximize2, RotateCcw } from "lucide-react";
 
 interface Props {
   graph: GraphData;
@@ -23,6 +23,17 @@ function nodeColor(type: string): string {
   return NODE_TYPE_COLORS[type] || NODE_TYPE_COLORS.entity;
 }
 
+/** Strip email-client artefacts like </O=ENRON/OU=...> from display labels */
+function cleanLabel(raw: string): string {
+  // Remove anything inside angle brackets
+  let s = raw.replace(/<[^>]*>/g, "").trim();
+  // Remove trailing punctuation noise
+  s = s.replace(/[,;:]+$/, "").trim();
+  // Collapse multiple spaces
+  s = s.replace(/\s{2,}/g, " ");
+  return s || raw;
+}
+
 interface FGNode {
   id: string;
   label: string;
@@ -30,6 +41,7 @@ interface FGNode {
   x?: number;
   y?: number;
   __degree?: number;
+  __cleanLabel?: string;
 }
 interface FGLink {
   source: string | FGNode;
@@ -39,11 +51,12 @@ interface FGLink {
 }
 
 export default function GraphVisualization({ graph }: Props) {
-  const fgRef = useRef<any>(null);
-  const [dimensions, setDimensions] = useState({ width: 500, height: 420 });
+  const fgRef        = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const [dimensions, setDimensions]   = useState({ width: 500, height: 420 });
   const [hoveredNode, setHoveredNode] = useState<FGNode | null>(null);
   const [selectedNode, setSelectedNode] = useState<FGNode | null>(null);
+  const [zoom, setZoom] = useState(1);
 
   useEffect(() => {
     setSelectedNode(null);
@@ -71,6 +84,8 @@ export default function GraphVisualization({ graph }: Props) {
     return map;
   }, [graph]);
 
+  const maxDeg = useMemo(() => Math.max(...Object.values(degreeMap), 1), [degreeMap]);
+
   const neighborSet = useMemo(() => {
     if (!selectedNode) return null;
     const s = new Set<string>();
@@ -82,7 +97,7 @@ export default function GraphVisualization({ graph }: Props) {
     return s;
   }, [selectedNode, graph]);
 
-  const connectedEdges = useMemo(() => {
+  const connectedEdgeKeys = useMemo(() => {
     if (!selectedNode) return null;
     const s = new Set<string>();
     graph.edges.forEach((e) => {
@@ -93,12 +108,16 @@ export default function GraphVisualization({ graph }: Props) {
   }, [selectedNode, graph]);
 
   const fgData = useMemo(() => ({
-    nodes: graph.nodes.map((n) => ({ ...n, __degree: degreeMap[n.id] || 0 })) as FGNode[],
+    nodes: graph.nodes.map((n) => ({
+      ...n,
+      __degree:     degreeMap[n.id] || 0,
+      __cleanLabel: cleanLabel(n.label),
+    })) as FGNode[],
     links: graph.edges.map((e) => ({
-      source: e.source,
-      target: e.target,
+      source:   e.source,
+      target:   e.target,
       relation: e.relation,
-      weight: e.weight,
+      weight:   e.weight,
     })) as FGLink[],
   }), [graph, degreeMap]);
 
@@ -111,63 +130,80 @@ export default function GraphVisualization({ graph }: Props) {
 
   const drawNode = useCallback((node: FGNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const deg   = node.__degree || 0;
-    const maxDeg = Math.max(...Object.values(degreeMap), 1);
-    const r     = 5 + (deg / maxDeg) * 9;
+    const r     = 4 + (deg / maxDeg) * 10;
     const color = nodeColor(node.type);
     const isHov = hoveredNode?.id === node.id;
     const isSel = selectedNode?.id === node.id;
     const isDim = neighborSet !== null && !neighborSet.has(node.id);
 
-    const alpha = isDim ? 0.18 : 1;
-
     ctx.save();
-    ctx.globalAlpha = alpha;
+    ctx.globalAlpha = isDim ? 0.15 : 1;
 
+    // Glow for hovered / selected
     if (isHov || isSel) {
-      ctx.shadowBlur  = isSel ? 24 : 14;
+      ctx.shadowBlur  = isSel ? 20 : 12;
       ctx.shadowColor = color;
     }
 
+    // Selection pulse ring
     if (isSel) {
       ctx.beginPath();
-      ctx.arc(node.x!, node.y!, r + 5, 0, Math.PI * 2);
-      ctx.fillStyle = color + "30";
+      ctx.arc(node.x!, node.y!, r + 6, 0, Math.PI * 2);
+      ctx.fillStyle = color + "28";
       ctx.fill();
+      ctx.strokeStyle = color + "80";
+      ctx.lineWidth   = 1 / globalScale;
+      ctx.stroke();
     }
 
+    // Main circle
     ctx.beginPath();
     ctx.arc(node.x!, node.y!, r + (isSel ? 2 : isHov ? 1 : 0), 0, Math.PI * 2);
     ctx.fillStyle = color;
     ctx.fill();
 
     if (isSel) {
-      ctx.strokeStyle = "#fff";
+      ctx.strokeStyle = "#ffffff";
       ctx.lineWidth   = 1.5 / globalScale;
       ctx.stroke();
     }
 
-    if (globalScale > 0.5) {
-      const fontSize    = Math.max(7, Math.min(11, 9 / Math.max(0.5, globalScale)));
-      ctx.font          = `500 ${fontSize}px Inter, system-ui`;
-      ctx.textAlign     = "center";
-      ctx.textBaseline  = "middle";
-      const label       = node.label.length > 18 ? node.label.slice(0, 16) + "…" : node.label;
-      const tw          = ctx.measureText(label).width;
-      const pad         = 2.5;
-      const bx = node.x! - tw / 2 - pad;
-      const by = node.y! + r + 2;
-      const bw = tw + pad * 2;
-      const bh = fontSize + pad * 2;
-      ctx.fillStyle     = "rgba(13,21,38,0.75)";
+    // ── Label visibility rules ──────────────────────────────────────────────
+    // Show label if:
+    //   a) This node is hovered or selected
+    //   b) It's a hub (top-3 by degree) and we're not too zoomed out
+    //   c) User has zoomed in enough (globalScale > 2.0) for any node
+    const isHub      = deg >= Math.max(3, maxDeg * 0.5);
+    const showLabel  = isHov || isSel || (isHub && globalScale > 0.6) || globalScale > 2.0;
+
+    if (showLabel && !isDim) {
+      const raw    = node.__cleanLabel || node.label;
+      const maxLen = isHov || isSel ? 22 : 14;
+      const label  = raw.length > maxLen ? raw.slice(0, maxLen - 1) + "…" : raw;
+
+      const fs = Math.min(11, Math.max(7, (isHov || isSel ? 11 : 9) / Math.max(0.6, globalScale)));
+      ctx.font = `${isSel ? "600" : "500"} ${fs}px Inter, system-ui`;
+      ctx.textAlign    = "center";
+      ctx.textBaseline = "middle";
+
+      const tw  = ctx.measureText(label).width;
+      const pad = 2.5;
+      const lx  = node.x!;
+      const ly  = node.y! + r + 3 + fs / 2 + pad;
+
+      // Pill background
+      ctx.fillStyle = "rgba(7,13,26,0.82)";
       ctx.beginPath();
-      ctx.roundRect(bx, by, bw, bh, 2);
+      ctx.roundRect(lx - tw / 2 - pad, ly - fs / 2 - pad, tw + pad * 2, fs + pad * 2, 3);
       ctx.fill();
-      ctx.fillStyle     = color;
-      ctx.fillText(label, node.x!, node.y! + r + 2 + fontSize / 2 + pad);
+
+      // Label text
+      ctx.fillStyle = isHov || isSel ? "#f1f5f9" : color;
+      ctx.fillText(label, lx, ly);
     }
 
     ctx.restore();
-  }, [hoveredNode, selectedNode, degreeMap, neighborSet]);
+  }, [hoveredNode, selectedNode, degreeMap, maxDeg, neighborSet]);
 
   const drawLink = useCallback((link: FGLink, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const src = link.source as FGNode;
@@ -175,42 +211,41 @@ export default function GraphVisualization({ graph }: Props) {
     if (!src.x || !src.y || !tgt.x || !tgt.y) return;
 
     const key      = `${typeof src === "object" ? src.id : src}::${typeof tgt === "object" ? tgt.id : tgt}`;
-    const isDimmed = connectedEdges !== null && !connectedEdges.has(key);
+    const isDimmed = connectedEdgeKeys !== null && !connectedEdgeKeys.has(key);
     const weight   = link.weight || 1;
-    const alpha    = isDimmed ? 0.06 : Math.min(1, weight / 5 + 0.3) * 0.65;
+    const alpha    = isDimmed ? 0.05 : Math.min(0.7, weight / 6 + 0.25);
 
     ctx.save();
     ctx.strokeStyle = `rgba(148,163,184,${alpha})`;
-    ctx.lineWidth   = isDimmed ? 0.5 : Math.min(3.5, weight * 0.6 + 0.5);
-    ctx.setLineDash([]);
+    ctx.lineWidth   = isDimmed ? 0.4 : Math.min(3, weight * 0.5 + 0.5);
     ctx.beginPath();
     ctx.moveTo(src.x, src.y);
     ctx.lineTo(tgt.x, tgt.y);
     ctx.stroke();
 
-    if (globalScale > 0.7 && !isDimmed) {
+    // Relation label — only when zoomed in and edge is not dimmed
+    if (globalScale > 1.4 && !isDimmed) {
       const mx    = (src.x + tgt.x) / 2;
       const my    = (src.y + tgt.y) / 2;
-      const fs    = Math.max(5.5, 7.5 / globalScale);
+      const fs    = Math.max(5, 7 / globalScale);
       const label = link.relation.replace(/_/g, " ").toLowerCase();
-      ctx.font    = `${fs}px Inter, system-ui`;
-
-      const tw  = ctx.measureText(label).width;
-      const pad = 2;
-      ctx.fillStyle = "rgba(13,21,38,0.7)";
+      const tw    = ctx.measureText(label).width;
+      const pad   = 1.5;
+      ctx.font     = `${fs}px Inter, system-ui`;
+      ctx.fillStyle = "rgba(7,13,26,0.72)";
       ctx.beginPath();
       ctx.roundRect(mx - tw / 2 - pad, my - fs / 2 - pad, tw + pad * 2, fs + pad * 2, 2);
       ctx.fill();
-
-      ctx.fillStyle    = "rgba(148,163,184,0.85)";
+      ctx.fillStyle    = "rgba(148,163,184,0.8)";
       ctx.textAlign    = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(label, mx, my);
     }
 
     ctx.restore();
-  }, [connectedEdges]);
+  }, [connectedEdgeKeys]);
 
+  // Selected node connections for the sidebar detail
   const selectedConnections = useMemo(() => {
     if (!selectedNode) return [];
     return graph.edges
@@ -218,8 +253,8 @@ export default function GraphVisualization({ graph }: Props) {
       .map((e) => ({
         rel:  e.relation.replace(/_/g, " "),
         peer: e.source === selectedNode.id
-          ? graph.nodes.find((n) => n.id === e.target)?.label ?? e.target
-          : graph.nodes.find((n) => n.id === e.source)?.label ?? e.source,
+          ? cleanLabel(graph.nodes.find((n) => n.id === e.target)?.label ?? e.target)
+          : cleanLabel(graph.nodes.find((n) => n.id === e.source)?.label ?? e.source),
         dir:  e.source === selectedNode.id ? "→" : "←",
       }));
   }, [selectedNode, graph]);
@@ -265,22 +300,23 @@ export default function GraphVisualization({ graph }: Props) {
               const count = graph.nodes.filter((n) => n.type === type).length;
               return (
                 <div key={type} className="flex items-center gap-1.5 text-xs text-slate-500">
-                  <div className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />
-                  <span>{type}</span>
-                  <span className="text-slate-600">({count})</span>
+                  <div className="w-2 h-2 rounded-full" style={{ background: color }} />
+                  {type}
+                  <span className="text-slate-700">({count})</span>
                 </div>
               );
             })}
           {graph.nodes.some((n) => n.type === "entity") && (
             <div className="flex items-center gap-1.5 text-xs text-slate-500">
-              <div className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+              <div className="w-2 h-2 rounded-full bg-slate-400" />
               Unknown ({graph.nodes.filter((n) => n.type === "entity").length})
             </div>
           )}
+          <div className="ml-auto text-xs text-slate-700 italic">hover or click nodes to explore</div>
         </div>
       )}
 
-      {/* Graph canvas */}
+      {/* Canvas */}
       <div ref={containerRef} className="flex-1 min-h-0 relative">
         {isEmpty ? (
           <div className="flex flex-col items-center justify-center h-full text-slate-600 gap-3">
@@ -299,71 +335,78 @@ export default function GraphVisualization({ graph }: Props) {
             linkCanvasObject={drawLink as any}
             linkCanvasObjectMode={() => "replace"}
             onNodeHover={(node) => setHoveredNode(node as FGNode | null)}
-            onNodeClick={(node) => setSelectedNode((prev) =>
-              prev?.id === (node as FGNode).id ? null : node as FGNode
-            )}
+            onNodeClick={(node) =>
+              setSelectedNode((prev) =>
+                prev?.id === (node as FGNode).id ? null : (node as FGNode)
+              )
+            }
+            onZoom={({ k }) => setZoom(k)}
             nodeRelSize={6}
             linkDirectionalArrowLength={5}
             linkDirectionalArrowRelPos={1}
-            linkDirectionalArrowColor={() => "rgba(148,163,184,0.35)"}
+            linkDirectionalArrowColor={() => "rgba(148,163,184,0.3)"}
             linkDirectionalParticles={(link) => ((link as FGLink).weight || 1) >= 2 ? 2 : 0}
             linkDirectionalParticleWidth={2}
-            linkDirectionalParticleColor={() => "rgba(148,163,184,0.6)"}
-            cooldownTicks={140}
+            linkDirectionalParticleColor={() => "rgba(148,163,184,0.55)"}
+            cooldownTicks={160}
             onEngineStop={() => fgRef.current?.zoomToFit(400, 40)}
-            d3AlphaDecay={0.018}
-            d3VelocityDecay={0.28}
+            d3AlphaDecay={0.015}
+            d3VelocityDecay={0.25}
+            // Repulsion to spread nodes more
+            d3Force="charge"
           />
         )}
 
-        {/* Hover tooltip */}
+        {/* Hover tooltip (no label shown inline at low zoom) */}
         {hoveredNode && !selectedNode && (
-          <div className="absolute bottom-4 left-4 glass rounded-lg px-3 py-2 pointer-events-none max-w-[200px]">
-            <div className="text-xs text-slate-500 mb-0.5">Entity</div>
-            <div className="text-sm font-medium text-slate-100 truncate">{hoveredNode.label}</div>
-            {hoveredNode.type !== "entity" && (
-              <div className="text-xs mt-0.5" style={{ color: nodeColor(hoveredNode.type) }}>
-                {hoveredNode.type}
-              </div>
-            )}
+          <div className="absolute bottom-4 left-4 glass rounded-lg px-3 py-2 pointer-events-none max-w-[220px]">
+            <div className="flex items-center gap-1.5 mb-1">
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: nodeColor(hoveredNode.type) }} />
+              <span className="text-xs text-slate-400">{hoveredNode.type !== "entity" ? hoveredNode.type : "Unknown"}</span>
+            </div>
+            <div className="text-sm font-semibold text-slate-100 break-words">
+              {cleanLabel(hoveredNode.label)}
+            </div>
             <div className="text-xs text-slate-600 mt-1">
               {degreeMap[hoveredNode.id] || 0} connection{degreeMap[hoveredNode.id] !== 1 ? "s" : ""}
             </div>
           </div>
         )}
 
-        {/* Selected node detail */}
+        {/* Selected node detail panel */}
         {selectedNode && (
-          <div className="absolute bottom-4 left-4 glass rounded-lg px-3 py-2.5 pointer-events-none max-w-[220px]">
-            <div className="flex items-center gap-1 mb-1">
-              <Info size={10} className="text-slate-500" />
-              <div className="text-xs text-slate-500">Selected</div>
+          <div className="absolute bottom-4 left-4 glass rounded-lg px-3 py-2.5 pointer-events-none max-w-[230px]">
+            <div className="flex items-center gap-1.5 mb-1.5">
+              <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: nodeColor(selectedNode.type) }} />
+              <span className="text-xs font-medium" style={{ color: nodeColor(selectedNode.type) }}>
+                {selectedNode.type !== "entity" ? selectedNode.type : "Unknown"}
+              </span>
             </div>
-            <div className="text-sm font-semibold text-slate-100 truncate">{selectedNode.label}</div>
-            {selectedNode.type !== "entity" && (
-              <div className="text-xs mt-0.5 mb-2" style={{ color: nodeColor(selectedNode.type) }}>
-                {selectedNode.type}
-              </div>
-            )}
-            <div className="space-y-1 max-h-28 overflow-y-auto">
-              {selectedConnections.slice(0, 6).map((c, i) => (
-                <div key={i} className="flex items-center gap-1 text-xs text-slate-400">
-                  <span className="text-slate-600 font-mono">{c.dir}</span>
-                  <span className="text-slate-500 italic text-[10px] shrink-0">{c.rel}</span>
+            <div className="text-sm font-bold text-slate-100 break-words mb-2">
+              {cleanLabel(selectedNode.label)}
+            </div>
+            <div className="text-xs text-slate-600 mb-2 font-mono">
+              {selectedConnections.length} connection{selectedConnections.length !== 1 ? "s" : ""}
+            </div>
+            <div className="space-y-1 max-h-32 overflow-y-auto">
+              {selectedConnections.slice(0, 7).map((c, i) => (
+                <div key={i} className="flex items-center gap-1 text-xs">
+                  <span className="text-slate-700 font-mono shrink-0">{c.dir}</span>
+                  <span className="text-slate-500 italic text-[10px] shrink-0 max-w-[70px] truncate">{c.rel}</span>
                   <span className="text-slate-300 truncate">{c.peer}</span>
                 </div>
               ))}
-              {selectedConnections.length > 6 && (
-                <div className="text-xs text-slate-600">+{selectedConnections.length - 6} more</div>
+              {selectedConnections.length > 7 && (
+                <div className="text-xs text-slate-700">+{selectedConnections.length - 7} more</div>
               )}
             </div>
           </div>
         )}
 
-        {/* Hint */}
-        {!isEmpty && !selectedNode && !hoveredNode && (
-          <div className="absolute top-3 right-3 text-xs text-slate-700 pointer-events-none select-none">
-            Click a node to explore
+        {/* Current zoom level indicator */}
+        {!isEmpty && (
+          <div className="absolute top-3 right-3 text-xs text-slate-800 pointer-events-none select-none font-mono">
+            {Math.round(zoom * 100)}%
           </div>
         )}
       </div>
