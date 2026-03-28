@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { GitBranch, Mail, ChevronRight } from "lucide-react";
+import { GitBranch, Mail, ChevronRight, TrendingUp } from "lucide-react";
 
 interface Props {
   graphFacts: string[];
@@ -13,12 +13,12 @@ function parseFact(fact: string): { src: string; rel: string; tgt: string } | nu
 }
 
 const RELATION_COLORS: Record<string, string> = {
-  MENTIONED:                 "bg-purple-500/20 text-purple-300 border-purple-500/30",
-  SENT_MOST_EMAILS_ABOUT:    "bg-blue-500/20 text-blue-300 border-blue-500/30",
-  RECEIVED_EMAIL_ABOUT:      "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
-  COMMUNICATES_WITH:         "bg-green-500/20 text-green-300 border-green-500/30",
-  WORKS_AT:                  "bg-amber-500/20 text-amber-300 border-amber-500/30",
-  MANAGES:                   "bg-rose-500/20 text-rose-300 border-rose-500/30",
+  MENTIONED:              "bg-purple-500/20 text-purple-300 border-purple-500/30",
+  SENT_MOST_EMAILS_ABOUT: "bg-blue-500/20 text-blue-300 border-blue-500/30",
+  RECEIVED_EMAIL_ABOUT:   "bg-cyan-500/20 text-cyan-300 border-cyan-500/30",
+  COMMUNICATES_WITH:      "bg-green-500/20 text-green-300 border-green-500/30",
+  WORKS_AT:               "bg-amber-500/20 text-amber-300 border-amber-500/30",
+  MANAGES:                "bg-rose-500/20 text-rose-300 border-rose-500/30",
 };
 
 function relColor(rel: string): string {
@@ -61,33 +61,41 @@ export default function EvidencePanel({ graphFacts, emailSnippets }: Props) {
             </span>
           </button>
         ))}
+
+        {/* Relevance indicator */}
+        <div className="ml-auto flex items-center gap-1 pr-3 text-xs text-slate-600">
+          <TrendingUp size={10} />
+          <span>{graphFacts.length + emailSnippets.length} total sources</span>
+        </div>
       </div>
 
       {/* Content */}
-      <div className="p-4 max-h-80 overflow-y-auto">
+      <div className="p-4 max-h-72 overflow-y-auto">
         {tab === "graph" && (
           graphFacts.length === 0 ? (
             <EmptyState message="No graph facts retrieved" />
           ) : (
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {graphFacts.map((fact, i) => {
                 const parsed = parseFact(fact);
                 return parsed ? (
-                  <div key={i} className="fact-row items-center">
-                    <span className="text-slate-200 font-medium text-xs shrink-0 max-w-[28%] truncate" title={parsed.src}>
+                  <div key={i} className="fact-row items-center group hover:bg-white/[0.02] rounded px-1 -mx-1 transition-colors">
+                    <span className="text-xs text-slate-600 font-mono w-5 shrink-0 select-none">{i + 1}</span>
+                    <span className="text-slate-200 font-medium text-xs shrink-0 max-w-[26%] truncate" title={parsed.src}>
                       {parsed.src}
                     </span>
-                    <ChevronRight size={10} className="text-slate-600 shrink-0" />
-                    <span className={`badge border ${relColor(parsed.rel)} shrink-0 max-w-[36%] text-center`}>
+                    <ChevronRight size={10} className="text-slate-700 shrink-0" />
+                    <span className={`badge border text-[10px] py-0.5 ${relColor(parsed.rel)} shrink-0 max-w-[34%]`}>
                       {parsed.rel}
                     </span>
-                    <ChevronRight size={10} className="text-slate-600 shrink-0" />
+                    <ChevronRight size={10} className="text-slate-700 shrink-0" />
                     <span className="text-slate-300 text-xs shrink min-w-0 truncate" title={parsed.tgt}>
                       {parsed.tgt}
                     </span>
                   </div>
                 ) : (
-                  <div key={i} className="fact-row text-slate-400 text-xs">
+                  <div key={i} className="fact-row text-slate-400 text-xs px-1">
+                    <span className="text-xs text-slate-600 font-mono w-5 shrink-0">{i + 1}</span>
                     {fact}
                   </div>
                 );
@@ -100,12 +108,17 @@ export default function EvidencePanel({ graphFacts, emailSnippets }: Props) {
           emailSnippets.length === 0 ? (
             <EmptyState message="No email snippets retrieved" />
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-2.5">
               {emailSnippets.map((snippet, i) => (
-                <div key={i} className="snippet-card">
-                  <div className="flex items-center gap-1.5 mb-1.5">
-                    <Mail size={11} className="text-accent-cyan" />
-                    <span className="text-xs text-slate-500 font-mono">Snippet {i + 1}</span>
+                <div key={i} className="snippet-card group hover:border-white/10 transition-colors">
+                  <div className="flex items-center justify-between gap-1.5 mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <div className="w-5 h-5 rounded flex items-center justify-center bg-accent-cyan/10 border border-accent-cyan/20">
+                        <Mail size={10} className="text-accent-cyan" />
+                      </div>
+                      <span className="text-xs text-slate-500 font-medium">Email Snippet {i + 1}</span>
+                    </div>
+                    <div className="w-1.5 h-1.5 rounded-full bg-accent-cyan/40" title="Retrieved via semantic search" />
                   </div>
                   <p className="text-slate-300 text-xs leading-relaxed line-clamp-4">{snippet}</p>
                 </div>

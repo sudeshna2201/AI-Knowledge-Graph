@@ -5,9 +5,10 @@ import QueryBar from "./components/QueryBar";
 import AnswerPanel from "./components/AnswerPanel";
 import EvidencePanel from "./components/EvidencePanel";
 import GraphVisualization from "./components/GraphVisualization";
+import GraphInsightsPanel from "./components/GraphInsightsPanel";
 import WarningBanner from "./components/WarningBanner";
 import DiagnosticsBar from "./components/DiagnosticsBar";
-import { Network, AlertCircle, CheckCircle2, Activity, BookOpen } from "lucide-react";
+import { Network, AlertCircle, CheckCircle2, Activity, BookOpen, Sparkles } from "lucide-react";
 
 export default function App() {
   const [result, setResult]     = useState<QueryResponse | null>(null);
@@ -65,7 +66,9 @@ export default function App() {
             ) : health ? (
               <div className={`flex items-center gap-1.5 text-xs ${health.status === "ok" ? "text-green-400" : "text-amber-400"}`}>
                 {health.status === "ok" ? <CheckCircle2 size={13} /> : <AlertCircle size={13} />}
-                {health.status === "ok" ? "All systems operational" : `Degraded — missing: ${health.missing_env.join(", ")}`}
+                {health.status === "ok"
+                  ? "All systems operational"
+                  : `Degraded — missing: ${health.missing_env.join(", ")}`}
               </div>
             ) : (
               <div className="flex items-center gap-1.5 text-xs text-slate-600">
@@ -95,12 +98,16 @@ export default function App() {
 
         {/* Loading skeleton */}
         {isLoading && !result && (
-          <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.1fr] gap-5 animate-fade-in">
-            <div className="flex flex-col gap-5">
-              <div className="h-52 rounded-xl shimmer" />
-              <div className="h-64 rounded-xl shimmer" />
+          <div className="flex flex-col gap-5 animate-fade-in">
+            <div className="h-14 rounded-xl shimmer" />
+            <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.1fr] gap-5">
+              <div className="flex flex-col gap-5">
+                <div className="h-52 rounded-xl shimmer" />
+                <div className="h-64 rounded-xl shimmer" />
+              </div>
+              <div className="h-[480px] rounded-xl shimmer hidden xl:block" />
             </div>
-            <div className="h-[480px] rounded-xl shimmer hidden xl:block" />
+            <div className="h-28 rounded-xl shimmer" />
           </div>
         )}
 
@@ -110,9 +117,9 @@ export default function App() {
             {/* Diagnostics */}
             <DiagnosticsBar diagnostics={result!.diagnostics} />
 
-            {/* Two-column layout */}
+            {/* Two-column layout: Left = Answer + Evidence, Right = Graph */}
             <div className="grid grid-cols-1 xl:grid-cols-[1fr_1.15fr] gap-5">
-              {/* Left column: Answer + Evidence */}
+              {/* Left column */}
               <div className="flex flex-col gap-5 min-w-0">
                 <AnswerPanel question={result!.question} answer={result!.answer} />
                 <EvidencePanel
@@ -122,16 +129,24 @@ export default function App() {
               </div>
 
               {/* Right column: Graph */}
-              <div className="min-h-[480px] xl:min-h-0 xl:h-auto">
+              <div className="min-h-[500px] xl:min-h-0 xl:h-auto">
                 <GraphVisualization graph={result!.graph} />
               </div>
             </div>
+
+            {/* Full-width Graph Insights panel */}
+            {result!.graph.nodes.length > 0 && (
+              <GraphInsightsPanel
+                graph={result!.graph}
+                graphFacts={result!.graph_facts}
+              />
+            )}
           </div>
         )}
 
         {/* Empty state */}
         {!hasResult && !isLoading && !error && (
-          <div className="flex flex-col items-center justify-center py-20 gap-4 text-slate-700 animate-fade-in">
+          <div className="flex flex-col items-center justify-center py-20 gap-5 text-slate-700 animate-fade-in">
             <div className="relative">
               <div className="w-24 h-24 rounded-full bg-surface-800/50 flex items-center justify-center">
                 <BookOpen size={36} className="text-slate-600" />
@@ -145,6 +160,19 @@ export default function App() {
               <p className="text-sm text-slate-600 max-w-sm">
                 Ask anything about the Enron email dataset. Results combine Neo4j knowledge graph facts with Pinecone semantic search.
               </p>
+            </div>
+            {/* Feature callouts */}
+            <div className="flex flex-wrap justify-center gap-3 mt-2">
+              {[
+                { icon: <Network size={11} />, label: "Interactive knowledge graph", color: "text-accent-purple" },
+                { icon: <Sparkles size={11} />, label: "LLM-grounded answers", color: "text-accent-blue" },
+                { icon: <Activity size={11} />, label: "Graph analytics & insights", color: "text-accent-cyan" },
+              ].map((f, i) => (
+                <div key={i} className={`flex items-center gap-1.5 text-xs ${f.color} bg-surface-800/40 border border-white/5 px-3 py-1.5 rounded-full`}>
+                  {f.icon}
+                  {f.label}
+                </div>
+              ))}
             </div>
           </div>
         )}
