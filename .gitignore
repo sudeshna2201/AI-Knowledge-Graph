@@ -1,3 +1,6 @@
 NF/
 .env
 repo_restore/
+attached_assets/
+.config/
+.local/
